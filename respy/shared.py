@@ -104,14 +104,24 @@ def create_base_draws(shape, seed):
     return draws
 
 
-def transform_disturbances(draws, shocks_mean, shocks_cholesky, n_wages):
-    """Transform the standard normal deviates to the relevant distribution."""
+def transform_shocks_with_cholesky_factor(draws, shocks_cholesky, n_wages):
+    r"""Transform the standard normal deviates to the relevant distribution.
+
+    We use the Cholesky factor, :math:`C`, to transform the standard normal draws to the
+    distribution of :math:`\mathcal{N}(0, \Sigma)` where :math:`\Sigma = CC^T`.
+
+    See [1]_, Chapter 7.4 for more information.
+
+    References
+    ----------
+    .. [1] Gentle, James E. Computational statistics. Vol. 308. New York: Springer,
+           2009.
+
+    """
     draws_transformed = draws.dot(shocks_cholesky.T)
 
-    draws_transformed += shocks_mean
-
-    draws_transformed[:, :n_wages] = np.clip(
-        np.exp(draws_transformed[:, :n_wages]), 0.0, HUGE_FLOAT
+    draws_transformed[:, :, :n_wages] = np.clip(
+        np.exp(draws_transformed[:, :, :n_wages]), 0, HUGE_FLOAT
     )
 
     return draws_transformed
@@ -269,3 +279,28 @@ def create_base_covariates(states, covariates_spec, raise_errors=True):
     covariates = covariates.drop(columns=states.columns)
 
     return covariates
+
+
+def convert_choice_variables_from_categorical_to_codes(df, optim_paras):
+    """Recode choices to choice codes in the model.
+
+    We cannot use ``.cat.codes`` because order might be different. The model requires an
+    order of ``choices_w_exp_w_wag``, ``choices_w_exp_wo_wage``,
+    ``choices_wo_exp_wo_wage``.
+
+    See also
+    --------
+    respy.pre_processing.model_processing._order_choices
+
+    """
+    choices_to_codes = {choice: i for i, choice in enumerate(optim_paras["choices"])}
+
+    if "choice" in df.columns:
+        df.choice = df.choice.replace(choices_to_codes).astype(np.uint8)
+
+    for i in range(1, optim_paras["n_lagged_choices"] + 1):
+        df[f"lagged_choice_{i}"] = (
+            df[f"lagged_choice_{i}"].replace(choices_to_codes).astype(np.uint8)
+        )
+
+    return df

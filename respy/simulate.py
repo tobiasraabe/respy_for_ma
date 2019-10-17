@@ -7,17 +7,18 @@ from numba import guvectorize
 from respy.config import HUGE_FLOAT
 from respy.pre_processing.model_processing import process_params_and_options
 from respy.shared import aggregate_keane_wolpin_utility
+from respy.shared import convert_choice_variables_from_categorical_to_codes
 from respy.shared import create_base_covariates
 from respy.shared import create_base_draws
 from respy.shared import create_type_covariates
 from respy.shared import generate_column_labels_simulation
 from respy.shared import predict_multinomial_logit
-from respy.shared import transform_disturbances
+from respy.shared import transform_shocks_with_cholesky_factor
 from respy.solve import solve_with_backward_induction
 from respy.state_space import StateSpace
 
 
-def get_simulate_func(params, options):
+def get_simulate_func(params, options, df=None):
     """Get the simulation function.
 
     Return :func:`simulate` where all arguments except the parameter vector are fixed
@@ -30,6 +31,8 @@ def get_simulate_func(params, options):
         DataFrame containing model parameters.
     options : dict
         Dictionary containing model options.
+    df : pandas.DataFrame
+        DataFrame containing a panel of individuals used for one-step-ahead simulation.
 
     Returns
     -------
@@ -38,6 +41,10 @@ def get_simulate_func(params, options):
 
     """
     optim_paras, options = process_params_and_options(params, options)
+
+    if df is not None:
+        options["simulation_agents"] = df.Identifier.nunique()
+        options["n_periods"] = df.Period.max() + 1
 
     state_space = StateSpace(optim_paras, options)
 
@@ -55,12 +62,13 @@ def get_simulate_func(params, options):
         base_draws_wage=base_draws_wage,
         state_space=state_space,
         options=options,
+        df=df,
     )
 
     return simulate_function
 
 
-def simulate(params, base_draws_sim, base_draws_wage, state_space, options):
+def simulate(params, base_draws_sim, base_draws_wage, state_space, options, df):
     """Simulate a data set.
 
     This function provides the interface for the simulation of a data set.
@@ -79,6 +87,8 @@ def simulate(params, base_draws_sim, base_draws_wage, state_space, options):
         State space of the model.
     options : dict
         Dictionary containing model options.
+    df : pandas.DataFrame
+        DataFrame containing a panel of individuals used for one-step-ahead simulation.
 
     Returns
     -------
@@ -92,22 +102,27 @@ def simulate(params, base_draws_sim, base_draws_wage, state_space, options):
 
     state_space = solve_with_backward_induction(state_space, optim_paras, options)
 
-    simulated_data = _simulate_data(
-        state_space, base_draws_sim, base_draws_wage, optim_paras, options
-    )
+    if df is None:
+        simulated_data = _n_step_ahead_simulation(
+            state_space, base_draws_sim, base_draws_wage, optim_paras, options
+        )
+    else:
+        simulated_data = _one_step_ahead_simulation(
+            df, state_space, base_draws_sim, base_draws_wage, optim_paras, options
+        )
 
     return simulated_data
 
 
-def _simulate_data(state_space, base_draws_sim, base_draws_wage, optim_paras, options):
-    """Simulate a data set.
+def _n_step_ahead_simulation(
+    state_space, base_draws_sim, base_draws_wage, optim_paras, options
+):
+    """Perform a n-step-ahead simulation.
 
-    At the beginning, individuals are initialized with zero experience in occupations
-    and random values for years of education, lagged choices and types. Then, each
-    simulated agent in each period is paired with its corresponding state in the state
-    space. We recalculate utilities for each choice as the individuals experience
-    different shocks in the simulation. In the end, observed and unobserved information
-    is recorded in a DataFrame.
+    This technique samples a number of individuals from the initial conditions and
+    simulates their wages and choices over a given number of periods.
+
+    The initial conditions are experiences, previous choices and the types.
 
     Returns
     -------
@@ -115,26 +130,15 @@ def _simulate_data(state_space, base_draws_sim, base_draws_wage, optim_paras, op
         Dataset of simulated individuals.
 
     """
-    n_choices = len(optim_paras["choices"])
     n_periods = optim_paras["n_periods"]
     n_wages = len(optim_paras["choices_w_wage"])
     n_choices_w_exp = len(optim_paras["choices_w_exp"])
     n_lagged_choices = optim_paras["n_lagged_choices"]
     n_simulation_agents = options["simulation_agents"]
 
-    # Standard deviates transformed to the distributions relevant for the agents actual
-    # decision making as traversing the tree.
-    base_draws_sim_transformed = np.full(
-        (n_periods, n_simulation_agents, n_choices), np.nan
+    base_draws_sim_transformed = transform_shocks_with_cholesky_factor(
+        base_draws_sim, optim_paras["shocks_cholesky"], n_wages
     )
-
-    for period in range(n_periods):
-        base_draws_sim_transformed[period] = transform_disturbances(
-            base_draws_sim[period],
-            np.zeros(n_choices),
-            optim_paras["shocks_cholesky"],
-            n_wages,
-        )
 
     base_draws_wage_transformed = np.exp(base_draws_wage * optim_paras["meas_error"])
 
@@ -146,7 +150,7 @@ def _simulate_data(state_space, base_draws_sim, base_draws_wage, optim_paras, op
     # Create a DataFrame to match columns to covariates. Is changed in-place.
     states_df = pd.DataFrame(
         np.column_stack(container),
-        columns=[f"exp_{i}" for i in optim_paras["choices_w_exp"]],
+        columns=[f"exp_{choice}" for choice in optim_paras["choices_w_exp"]],
     ).assign(period=0)
 
     for lag in reversed(range(1, n_lagged_choices + 1)):
@@ -161,70 +165,18 @@ def _simulate_data(state_space, base_draws_sim, base_draws_wage, optim_paras, op
 
     for period in range(n_periods):
 
-        # Get indices which connect states in the state space and simulated agents.
-        indices = state_space.indexer[period][
-            tuple(current_states[:, i] for i in range(current_states.shape[1]))
-        ]
-
-        # Get continuation values. Indices work on the complete state space whereas
-        # continuation values are period-specific. Make them period-specific.
-        continuation_values = state_space.get_continuation_values(period)
-        cont_indices = indices - state_space.slices_by_periods[period].start
-
-        # Select relevant subset of random draws.
-        draws_shock = base_draws_sim_transformed[period]
-        draws_wage = base_draws_wage_transformed[period]
-
-        # Get total values and ex post rewards.
-        value_functions, flow_utilities = calculate_value_functions_and_flow_utilities(
-            state_space.wages[indices],
-            state_space.nonpec[indices],
-            continuation_values[cont_indices],
-            draws_shock,
-            optim_paras["delta"],
-            state_space.is_inadmissible[indices],
+        rows = _simulate_single_period(
+            period,
+            current_states,
+            state_space,
+            base_draws_sim_transformed,
+            base_draws_wage_transformed,
+            optim_paras,
         )
 
-        # We need to ensure that no individual chooses an inadmissible state. This
-        # cannot be done directly in the calculate_value_functions function as the
-        # penalty otherwise dominates the interpolation equation. The parameter
-        # INADMISSIBILITY_PENALTY is a compromise. It is only relevant in very
-        # constructed cases.
-        value_functions = np.where(
-            state_space.is_inadmissible[indices], -HUGE_FLOAT, value_functions
-        )
-
-        # Determine optimal choice.
-        choice = np.argmax(value_functions, axis=1)
-
-        wages = state_space.wages[indices] * draws_shock * draws_wage
-        wages[:, n_wages:] = np.nan
-        wage = np.choose(choice, wages.T)
-
-        # Record data of all agents in one period.
-        rows = np.column_stack(
-            (
-                np.arange(n_simulation_agents),
-                np.full(n_simulation_agents, period),
-                choice,
-                wage,
-                # Write relevant state space for period to data frame. However, the
-                # individual's type is not part of the observed dataset. This is
-                # included in the simulated dataset.
-                current_states,
-                # As we are working with a simulated dataset, we can also output
-                # additional information that is not available in an observed dataset.
-                # The discount rate is included as this allows to construct the EMAX
-                # with the information provided in the simulation output.
-                state_space.nonpec[indices],
-                state_space.wages[indices, :n_wages],
-                flow_utilities,
-                value_functions,
-                draws_shock,
-                np.full(n_simulation_agents, optim_paras["delta"]),
-            )
-        )
         data.append(rows)
+
+        choice = rows[:, 1].astype(int)
 
         # Update work experiences.
         current_states[np.arange(n_simulation_agents), choice] = np.where(
@@ -243,9 +195,169 @@ def _simulate_data(state_space, base_draws_sim, base_draws_wage, optim_paras, op
             ]
             current_states[:, n_choices_w_exp] = choice
 
-    simulated_data = _process_simulated_data(data, optim_paras)
+    identifier = np.tile(np.arange(options["simulation_agents"]), options["n_periods"])
+
+    simulated_data = _process_simulated_data(identifier, data, optim_paras)
 
     return simulated_data
+
+
+def _one_step_ahead_simulation(
+    df, state_space, base_draws_sim, base_draws_wage, optim_paras, options
+):
+    """Perform one-step-ahead simulation.
+
+    This technique takes the data and simulates wages and choices for every
+    individual-period observation. The resulting data can be compared with the real data
+    to measure the within-sample fit.
+
+    Note that the type of an individual is unknown to the researcher and not included in
+    the data. Thus, types are assigned based on covariates of individuals in the initial
+    period.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Panel data on individuals.
+
+    Returns
+    -------
+    simulated_data : pandas.DataFrame
+        Panel data on individuals with simulated wages and choices.
+
+    """
+    n_periods = options["n_periods"]
+    n_wages = len(optim_paras["choices_w_wage"])
+
+    base_draws_sim_transformed = transform_shocks_with_cholesky_factor(
+        base_draws_sim, optim_paras["shocks_cholesky"], n_wages
+    )
+
+    base_draws_wage_transformed = np.exp(base_draws_wage * optim_paras["meas_error"])
+
+    state_cols = (
+        [f"exp_{choice}" for choice in optim_paras["choices_w_exp"]]
+        + [f"lagged_choice_{i}" for i in range(1, optim_paras["n_lagged_choices"])]
+        + ["type"]
+    )
+
+    df = df.rename(
+        columns=lambda x: x.replace("Experience", "exp").lower()
+    ).sort_values(["period", "identifier"])
+
+    df = convert_choice_variables_from_categorical_to_codes(df, optim_paras)
+
+    types = _get_random_types(df.loc[df.period.eq(0)], optim_paras, options)
+    df["type"] = df.identifier.replace(
+        dict(zip(np.arange(df.identifier.unique().shape[0]), types))
+    )
+
+    data = []
+
+    for period in range(n_periods):
+
+        current_states = df.loc[df.period.eq(period), state_cols].to_numpy()
+
+        rows = _simulate_single_period(
+            period,
+            current_states,
+            state_space,
+            base_draws_sim_transformed,
+            base_draws_wage_transformed,
+            optim_paras,
+        )
+
+        data.append(rows)
+
+    simulated_data = _process_simulated_data(df.identifier, data, optim_paras)
+
+    return simulated_data
+
+
+def _simulate_single_period(
+    period,
+    current_states,
+    state_space,
+    base_draws_sim_transformed,
+    base_draws_wage_transformed,
+    optim_paras,
+):
+    """Simulate individuals in a single period.
+
+    This function takes a set of states and simulates wages, choices and other
+    information.
+
+    """
+    n_choices = len(optim_paras["choices"])
+    n_wages = len(optim_paras["choices_w_wage"])
+    n_individuals = current_states.shape[0]
+
+    # Get indices which connect states in the state space and simulated agents.
+    indices = state_space.indexer[period][
+        tuple(current_states[:, i] for i in range(current_states.shape[1]))
+    ]
+
+    # Get continuation values. Indices work on the complete state space whereas
+    # continuation values are period-specific. Make them period-specific.
+    continuation_values = state_space.get_continuation_values(period)
+    cont_indices = indices - state_space.slices_by_periods[period].start
+
+    # Select relevant subset of random draws.
+    draws_shock = base_draws_sim_transformed[period][:n_individuals]
+    draws_wage = base_draws_wage_transformed[period][:n_individuals]
+
+    # Get total values and ex post rewards.
+    value_functions, flow_utilities = calculate_value_functions_and_flow_utilities(
+        state_space.wages[indices],
+        state_space.nonpec[indices],
+        continuation_values[cont_indices],
+        draws_shock.reshape(-1, 1, n_choices),
+        optim_paras["delta"],
+        state_space.is_inadmissible[indices],
+    )
+    value_functions = value_functions.reshape(-1, n_choices)
+    flow_utilities = flow_utilities.reshape(-1, n_choices)
+
+    # We need to ensure that no individual chooses an inadmissible state. This
+    # cannot be done directly in the calculate_value_functions function as the
+    # penalty otherwise dominates the interpolation equation. The parameter
+    # INADMISSIBILITY_PENALTY is a compromise. It is only relevant in very
+    # constructed cases.
+    value_functions = np.where(
+        state_space.is_inadmissible[indices], -HUGE_FLOAT, value_functions
+    )
+
+    # Determine optimal choice.
+    choice = np.argmax(value_functions, axis=1)
+
+    wages = state_space.wages[indices] * draws_shock * draws_wage
+    wages[:, n_wages:] = np.nan
+    wage = np.choose(choice, wages.T)
+
+    # Record data of all agents in one period.
+    rows = np.column_stack(
+        (
+            np.full(n_individuals, period),
+            choice,
+            wage,
+            # Write relevant state space for period to data frame. However, the
+            # individual's type is not part of the observed dataset. This is
+            # included in the simulated dataset.
+            current_states,
+            # As we are working with a simulated dataset, we can also output
+            # additional information that is not available in an observed dataset.
+            # The discount rate is included as this allows to construct the EMAX
+            # with the information provided in the simulation output.
+            state_space.nonpec[indices],
+            state_space.wages[indices, :n_wages],
+            flow_utilities,
+            value_functions,
+            draws_shock,
+            np.full(n_individuals, optim_paras["delta"]),
+        )
+    )
+
+    return rows
 
 
 def _get_random_types(states, optim_paras, options):
@@ -412,11 +524,13 @@ def _convert_choice_variables_from_codes_to_categorical(df, optim_paras):
     return df
 
 
-def _process_simulated_data(data, optim_paras):
+def _process_simulated_data(identifier, data, optim_paras):
     labels, dtypes = generate_column_labels_simulation(optim_paras)
 
     df = (
-        pd.DataFrame(data=np.vstack(data), columns=labels)
+        pd.DataFrame(
+            data=np.column_stack((identifier, np.row_stack(data))), columns=labels
+        )
         .astype(dtypes)
         .sort_values(["Identifier", "Period"])
         .reset_index(drop=True)
