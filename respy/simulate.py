@@ -310,10 +310,11 @@ def _simulate_single_period(
         state_space.wages[indices],
         state_space.nonpec[indices],
         continuation_values[cont_indices],
-        draws_shock.reshape(-1, 1, n_choices),
+        draws_shock,
         optim_paras["delta"],
         state_space.is_inadmissible[indices],
     )
+
     value_functions = value_functions.reshape(-1, n_choices)
     flow_utilities = flow_utilities.reshape(-1, n_choices)
 

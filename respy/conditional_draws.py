@@ -59,9 +59,11 @@ def create_draws_and_log_prob_wages(
 
     choices = choices.astype(np.uint16)
     relevant_systematic_wages = np.choose(choices, wages_systematic.T)
+
     log_wage_systematic = np.clip(
         np.log(relevant_systematic_wages), -HUGE_FLOAT, HUGE_FLOAT
     )
+
     cov = shocks_cholesky @ shocks_cholesky.T
 
     updated_means, log_prob_wages = update_mean_and_evaluate_likelihood(
