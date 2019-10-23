@@ -11,6 +11,8 @@ TEST_RESOURCES_DIR = ROOT_DIR / "tests" / "resources"
 HUGE_FLOAT = 1e20
 TINY_FLOAT = 1e-8
 PRINT_FLOAT = 1e10
+MAX_FLOAT = 1e300
+MIN_FLOAT = -1e300
 
 # Number of decimals that are compared for tests This is currently only used in
 # regression tests.
