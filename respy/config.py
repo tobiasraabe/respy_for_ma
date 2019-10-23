@@ -13,6 +13,8 @@ TINY_FLOAT = 1e-8
 PRINT_FLOAT = 1e10
 MAX_FLOAT = 1e300
 MIN_FLOAT = -1e300
+MAX_LOG_FLOAT = 700
+MIN_LOG_FLOAT = -700
 
 # Number of decimals that are compared for tests This is currently only used in
 # regression tests.
