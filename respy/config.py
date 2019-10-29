@@ -8,9 +8,6 @@ ROOT_DIR = Path(__file__).parent
 # Directory with additional resources for the testing harness
 TEST_RESOURCES_DIR = ROOT_DIR / "tests" / "resources"
 
-HUGE_FLOAT = 1e20
-TINY_FLOAT = 1e-8
-PRINT_FLOAT = 1e10
 MAX_FLOAT = 1e300
 MIN_FLOAT = -1e300
 MAX_LOG_FLOAT = 700
