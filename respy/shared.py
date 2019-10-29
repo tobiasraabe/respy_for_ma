@@ -10,7 +10,8 @@ from numba import njit
 from numba import vectorize
 
 from respy.config import INADMISSIBILITY_PENALTY
-from respy.config import MAX_FLOAT
+from respy.config import MAX_LOG_FLOAT
+from respy.config import MIN_LOG_FLOAT
 
 
 @njit
@@ -71,8 +72,8 @@ def transform_shocks_with_cholesky_factor(draws, shocks_cholesky, n_wages):
     """
     draws_transformed = draws.dot(shocks_cholesky.T)
 
-    draws_transformed[:, :n_wages] = np.clip(
-        np.exp(draws_transformed[:, :n_wages]), 0, MAX_FLOAT
+    draws_transformed[:, :n_wages] = np.exp(
+        np.clip(draws_transformed[:, :n_wages], MIN_LOG_FLOAT, MAX_LOG_FLOAT)
     )
 
     return draws_transformed
