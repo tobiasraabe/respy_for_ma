@@ -32,6 +32,9 @@ def get_example_model(model, with_data=True):
     elif "kw_94" in model and with_data:
         simulate = get_simulate_func(params, options)
         df = (simulate(params),)
+    elif "robinson" in model and with_data:
+        simulate = get_simulate_func(params, options)
+        df = (simulate(params),)
     else:
         df = ()
         if with_data:
