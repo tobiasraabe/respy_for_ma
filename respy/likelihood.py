@@ -285,6 +285,7 @@ def _internal_log_like_obs(
     continuation_values = state_space.emax_value_functions[selected_indices]
     continuation_values = np.where(selected_indices >= 0, continuation_values, 0)
 
+
     choice_loglikes = simulate_log_probability_of_individuals_observed_choice(
         state_space.wages[indices],
         state_space.nonpec[indices],
@@ -313,7 +314,6 @@ def _internal_log_like_obs(
         contribs = per_individual_loglikes.flatten()
 
     contribs = np.clip(contribs, -HUGE_FLOAT, HUGE_FLOAT)
-
     return contribs
 
 
@@ -372,6 +372,7 @@ def log_softmax_i(x, i, tau=1):
     """
     max_x = np.max(x)
     smoothed_differences = (x - max_x) / tau
+
     log_sum_exp = np.log(np.sum(np.exp(smoothed_differences)))
     log_probability = smoothed_differences[i] - log_sum_exp
 

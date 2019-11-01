@@ -1,12 +1,12 @@
 
 estimation_draws: 100
 estimation_seed: 100
-estimation_tau: 0.001
+estimation_tau: 0.00001
 interpolation_points: -1
-n_periods: 5
+n_periods: 10
 simulation_agents: 100
 simulation_seed: 132
-solution_draws: 500
+solution_draws: 100
 solution_seed: 456
 covariates:
     constant: "1"
