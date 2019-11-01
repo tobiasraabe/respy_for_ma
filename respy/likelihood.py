@@ -55,9 +55,9 @@ def get_crit_func(params, options, df, version="log_like"):
 
     optim_paras = _adjust_optim_paras_for_estimation(optim_paras, df)
 
-    state_space = StateSpace(optim_paras, options)
-
     check_estimation_data(df, optim_paras)
+
+    state_space = StateSpace(optim_paras, options)
 
     (
         choices,
@@ -275,6 +275,9 @@ def _internal_log_like_obs(
         optim_paras["meas_error"],
         optim_paras["is_meas_error"],
     )
+
+    print(wage_loglikes)
+
 
     draws = draws.reshape(n_obs, n_types, -1, n_choices)
 

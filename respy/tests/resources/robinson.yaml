@@ -1,10 +1,10 @@
 
-estimation_draws: 100
+estimation_draws: 1
 estimation_seed: 100
-estimation_tau: 50
+estimation_tau: 1
 interpolation_points: -1
-n_periods: 10
-simulation_agents: 1_000
+n_periods: 2
+simulation_agents: 1
 simulation_seed: 132
 solution_draws: 500
 solution_seed: 456
