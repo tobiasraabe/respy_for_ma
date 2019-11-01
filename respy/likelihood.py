@@ -276,9 +276,6 @@ def _internal_log_like_obs(
         optim_paras["is_meas_error"],
     )
 
-    print(wage_loglikes)
-
-
     draws = draws.reshape(n_obs, n_types, -1, n_choices)
 
     # Get continuation values. The problem is that we only need a subset of continuation
