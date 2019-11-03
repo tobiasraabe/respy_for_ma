@@ -44,10 +44,10 @@ def check_model_solution(optim_paras, options, state_space):
     # Distribute class attributes
     choices = optim_paras["choices"]
     max_initial_experience = np.array(
-        [choices[choice]["start"].max() for choice in optim_paras["choices_w_exp"]]
+        [max(choices[choice]["start"]) for choice in optim_paras["choices_w_exp"]]
     )
     n_initial_exp_comb = np.prod(
-        [choices[choice]["start"].shape[0] for choice in optim_paras["choices_w_exp"]]
+        [len(choices[choice]["start"]) for choice in optim_paras["choices_w_exp"]]
     )
     n_periods = options["n_periods"]
     n_types = optim_paras["n_types"]
@@ -89,8 +89,14 @@ def check_model_solution(optim_paras, options, state_space):
     assert not pd.DataFrame(state_space.states).duplicated().any()
 
     # Check the number of states in the first time period.
+    obs_factor = np.prod(
+        np.array([len(x) for x in optim_paras["observables"].values()])
+    )
     n_states_start = (
-        n_types * n_initial_exp_comb * (optim_paras["n_lagged_choices"] + 1)
+        n_types
+        * n_initial_exp_comb
+        * (optim_paras["n_lagged_choices"] + 1)
+        * obs_factor
     )
     assert state_space.get_attribute_from_period("states", 0).shape[0] == n_states_start
     assert np.sum(state_space.indexer[0] >= 0) == n_states_start

@@ -141,10 +141,14 @@ def _n_step_ahead_simulation(
 
     base_draws_wage_transformed = np.exp(base_draws_wage * optim_paras["meas_error"])
 
+    # Create a DataFrame which is changed in-place by the sampling functions below.
+    states_df = pd.DataFrame(
+        {"identifier": np.arange(n_simulation_agents), "period": 0}
+    )
+
     # Create initial experiences, lagged choices and types for agents in simulation.
     container = ()
-    for choice in optim_paras["choices_w_exp"]:
-        container += (_get_random_initial_experience(choice, optim_paras, options),)
+    container_observables = ()
 
     # Create a DataFrame to match columns to covariates. Is changed in-place.
     states_df = pd.DataFrame(
@@ -152,14 +156,25 @@ def _n_step_ahead_simulation(
         columns=[f"exp_{choice}" for choice in optim_paras["choices_w_exp"]],
     ).assign(period=0)
 
+    for observable in optim_paras["observables"].keys():
+        container_observables += (
+            _get_random_initial_observable(states_df, observable, options, optim_paras),
+        )
+
+    for choice in optim_paras["choices_w_exp"]:
+        container += (
+            _get_random_initial_experience(choice, states_df, optim_paras, options),
+        )
+
     for lag in reversed(range(1, n_lagged_choices + 1)):
-        container += (_get_random_lagged_choices(states_df, optim_paras, options, lag),)
+        container += (_get_random_lagged_choices(lag, states_df, optim_paras, options),)
+
+    container += container_observables
 
     container += (_get_random_types(states_df, optim_paras, options),)
 
     # Create a matrix of initial states of simulated agents.
     current_states = np.column_stack(container).astype(np.uint8)
-
     data = []
 
     for period in range(n_periods):
@@ -366,7 +381,6 @@ def _get_random_types(states, optim_paras, options):
         types = np.zeros(options["simulation_agents"])
     else:
         type_covariates = create_type_covariates(states, optim_paras, options)
-
         np.random.seed(next(options["simulation_seed_iteration"]))
 
         z = np.dot(type_covariates, optim_paras["type_prob"].T)
@@ -376,20 +390,34 @@ def _get_random_types(states, optim_paras, options):
     return types
 
 
-def _get_random_initial_experience(choice, optim_paras, options):
+def _get_random_initial_experience(choice, states_df, optim_paras, options):
     """Get random, initial levels of schooling for simulated agents."""
+    levels = optim_paras["choices"][choice]["start"]
+
+    covariates_df = create_base_covariates(
+        states_df, options["covariates"], raise_errors=False
+    )
+    all_data = pd.concat([covariates_df, states_df], axis="columns", sort=False)
+
+    x_beta = ()
+
+    for level in levels:
+        coefficients = optim_paras["choices"][choice]["start"][level]
+        xb = np.dot(all_data[coefficients.index], coefficients).astype(np.float64)
+        x_beta += (xb,)
+
+    probabilities = softmax(np.column_stack(x_beta), axis=1)
+
     np.random.seed(next(options["simulation_seed_iteration"]))
 
-    initial_experience = np.random.choice(
-        optim_paras["choices"][choice]["start"],
-        p=optim_paras["choices"][choice]["share"],
-        size=options["simulation_agents"],
-    )
+    initial_experience = _random_choice(np.array(list(levels)), probabilities)
+
+    states_df[f"exp_{choice}"] = initial_experience
 
     return initial_experience
 
 
-def _get_random_lagged_choices(states_df, optim_paras, options, lag):
+def _get_random_lagged_choices(lag, states_df, optim_paras, options):
     """Get random, initial levels of lagged choices for simulated agents.
 
     For a given lagged choice, compute the covariates. Then, calculate the probabilities
@@ -402,6 +430,8 @@ def _get_random_lagged_choices(states_df, optim_paras, options, lag):
 
     Parameters
     ----------
+    lag : int
+        Number of lag.
     states_df : pandas.DataFrame
         DataFrame containing the period, initial experiences and previous lagged
         choices, but not types.
@@ -409,8 +439,6 @@ def _get_random_lagged_choices(states_df, optim_paras, options, lag):
         Dictionary of model parameters.
     options : dict
         Dictionary of model options.
-    lag : int
-        Number of lag.
 
     Returns
     -------
@@ -448,6 +476,17 @@ def _get_random_lagged_choices(states_df, optim_paras, options, lag):
     )
 
     return lagged_choices
+
+
+def _get_random_initial_observable(states_df, observable, options, optim_paras):
+    np.random.seed(next(options["simulation_seed_iteration"]))
+
+    probs = optim_paras["observables"][observable]
+    obs = np.random.choice(
+        np.arange(len(probs)), size=options["simulation_agents"], p=probs
+    )
+    states_df[observable] = obs
+    return obs
 
 
 @guvectorize(
@@ -542,7 +581,7 @@ def _process_simulated_data(identifier, data, optim_paras):
     return df
 
 
-def _random_choice(choices, probabilities):
+def _random_choice(choices, probabilities, decimals=6):
     """Return elements of choices for a two-dimensional array of probabilities.
 
     It is assumed that probabilities are ordered (n_samples, n_choices).
@@ -575,7 +614,7 @@ def _random_choice(choices, probabilities):
     """
     cumulative_distribution = probabilities.cumsum(axis=1)
     # Probabilities often do not sum to one but 0.99999999999999999.
-    cumulative_distribution[:, -1] = np.round(cumulative_distribution[:, -1], 15)
+    cumulative_distribution[:, -1] = np.round(cumulative_distribution[:, -1], decimals)
 
     if not (cumulative_distribution[:, -1] == 1).all():
         raise ValueError("Probabilities do not sum to one.")
