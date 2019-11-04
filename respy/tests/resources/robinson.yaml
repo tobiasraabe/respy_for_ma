@@ -1,7 +1,7 @@
 
 estimation_draws: 100
 estimation_seed: 100
-estimation_tau: 0.01
+estimation_tau: 0.001
 interpolation_points: -1
 n_periods: 5
 simulation_agents: 1000
