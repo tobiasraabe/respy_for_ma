@@ -146,17 +146,11 @@ def _n_step_ahead_simulation(
         {"identifier": np.arange(n_simulation_agents), "period": 0}
     )
 
-    # Create initial experiences, lagged choices and types for agents in simulation.
+    # Sample other state space dimensions.
     container = ()
     container_observables = ()
 
-    # Create a DataFrame to match columns to covariates. Is changed in-place.
-    states_df = pd.DataFrame(
-        np.column_stack(container),
-        columns=[f"exp_{choice}" for choice in optim_paras["choices_w_exp"]],
-    ).assign(period=0)
-
-    for observable in optim_paras["observables"].keys():
+    for observable in optim_paras["observables"]:
         container_observables += (
             _get_random_initial_observable(states_df, observable, options, optim_paras),
         )
@@ -486,6 +480,7 @@ def _get_random_initial_observable(states_df, observable, options, optim_paras):
         np.arange(len(probs)), size=options["simulation_agents"], p=probs
     )
     states_df[observable] = obs
+
     return obs
 
 
