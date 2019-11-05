@@ -8,3 +8,4 @@ Tutorials
    robinson-crusoe.ipynb
    lagged-choices.ipynb
    calibration-maximum-likelihood.ipynb
+   calibration-simulated-moments.ipynb
