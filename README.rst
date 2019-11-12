@@ -1,27 +1,11 @@
-respy
-=====
+respy for MA
+============
 
-.. image:: https://readthedocs.org/projects/respy/badge/?version=master
-    :target: https://respy.readthedocs.io/en/master
-    :alt: Documentation Status
+This repository contains a copy of respy at the time I wrote my master's thesis.
+It is for replication purposes. Everyone else should use the real respy.
 
-.. image:: https://travis-ci.org/OpenSourceEconomics/respy.svg?branch=master
-    :target: https://travis-ci.org/OpenSourceEconomics/respy
+The important versions in this repository are
 
-.. image:: https://ci.appveyor.com/api/projects/status/760nqwfsua0ej5u1/branch/master?svg=true
-    :target: https://ci.appveyor.com/project/OpenSourceEconomics/respy
-
-.. image:: https://img.shields.io/badge/code%20style-black-000000.svg
-    :target: https://github.com/python/black
-
-``respy``  is an open-source Python package for the simulation and estimation of a
-prototypical finite-horizon discrete choice dynamic programming model. We build on the
-baseline model presented in:
-
-    Keane, M. P. and  Wolpin, K. I. (1994). `The Solution and Estimation of Discrete
-    Choice Dynamic Programming Models by Simulation and Interpolation: Monte Carlo
-    Evidence <https://doi.org/10.2307/2109768>`_. *The Review of Economics and
-    Statistics*, 76(4): 648-672.
-
-Please visit our `online documentation <https://respy.readthedocs.io/en/latest/>`_ for
-details.
+- `kw2000` to simulate the choice probabilties for Keane and Wolpin (2000)
+- `one-step-ahead-simulation` to provide the within-sample wage fits
+- `better-clipping` to perform the estimations
